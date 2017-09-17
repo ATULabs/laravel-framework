@@ -3,6 +3,7 @@
 namespace Illuminate\Foundation\Exceptions;
 
 use Exception;
+use Throwable;
 use Whoops\Run as Whoops;
 use Illuminate\Support\Arr;
 use Psr\Log\LoggerInterface;
@@ -151,7 +152,7 @@ class Handler implements ExceptionHandlerContract
                 'userId' => Auth::id(),
                 'email' => Auth::user() ? Auth::user()->email : null,
             ]);
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             return [];
         }
     }
@@ -166,7 +167,7 @@ class Handler implements ExceptionHandlerContract
     public function render($request, Exception $e)
     {
         if (method_exists($e, 'render') && $response = $e->render($request)) {
-            return Router::prepareResponse($request, $response);
+            return Router::toResponse($request, $response);
         } elseif ($e instanceof Responsable) {
             return $e->toResponse($request);
         }
@@ -382,10 +383,11 @@ class Handler implements ExceptionHandlerContract
     {
         $status = $e->getStatusCode();
 
-        view()->replaceNamespace('errors', [
-            resource_path('views/errors'),
-            __DIR__.'/views',
-        ]);
+        $paths = collect(config('view.paths'));
+
+        view()->replaceNamespace('errors', $paths->map(function ($path) {
+            return "{$path}/errors";
+        })->push(__DIR__.'/views')->all());
 
         if (view()->exists($view = "errors::{$status}")) {
             return response()->view($view, ['exception' => $e], $status, $e->getHeaders());
@@ -445,9 +447,12 @@ class Handler implements ExceptionHandlerContract
     {
         return config('app.debug') ? [
             'message' => $e->getMessage(),
+            'exception' => get_class($e),
             'file' => $e->getFile(),
             'line' => $e->getLine(),
-            'trace' => $e->getTrace(),
+            'trace' => collect($e->getTrace())->map(function ($trace) {
+                return Arr::except($trace, ['args']);
+            })->all(),
         ] : [
             'message' => $this->isHttpException($e) ? $e->getMessage() : 'Server Error',
         ];
